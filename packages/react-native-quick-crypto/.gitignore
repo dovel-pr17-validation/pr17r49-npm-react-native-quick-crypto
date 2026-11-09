@@ -1,0 +1,8 @@
+# will be copied from root README.md
+README.md
+
+ios/**
+
+.cache/**
+build/**
+compile_commands.json

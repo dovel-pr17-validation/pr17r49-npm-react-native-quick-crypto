@@ -1,0 +1,12 @@
+{
+  "extends": ["@react-native/typescript-config", "../config/tsconfig.json"],
+  "include": [
+    "index.ts",
+    "app.json",
+    "src",
+    "./**/*.ts",
+    "./**/*.tsx",
+    "../packages/react-native-quick-crypto/src/**/*.ts"
+  ],
+  "exclude": ["**/node_modules", "**/Pods"]
+}

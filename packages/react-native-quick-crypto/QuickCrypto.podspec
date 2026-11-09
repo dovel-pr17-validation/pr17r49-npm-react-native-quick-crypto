@@ -1,0 +1,259 @@
+require "json"
+require "digest"
+require "shellwords"
+
+package = JSON.parse(File.read(File.join(__dir__, "package.json")))
+
+Pod::UI.puts "[QuickCrypto]  💨 crypto just got quicker"
+
+Pod::Spec.new do |s|
+  s.name         = "QuickCrypto"
+  s.version      = package["version"]
+  s.summary      = package["description"]
+  s.homepage     = package["homepage"]
+  s.license      = package["license"]
+  s.authors      = package["authors"]
+
+  s.ios.deployment_target = min_ios_version_supported
+  s.visionos.deployment_target = 1.0
+  s.macos.deployment_target = 10.13
+  s.tvos.deployment_target = 13.4
+
+  s.source = { :git => "https://github.com/margelo/react-native-quick-crypto.git", :tag => "#{s.version}" }
+
+  # Prebuilt static OpenSSL whose every global symbol is renamed to rnqc_*, with
+  # the original names demoted to non-external. QuickCrypto is source-built, so
+  # its OpenSSL references are resolved when the *app* links; without the rename,
+  # any other library that statically embeds OpenSSL wins the first-come symbol
+  # resolution and QuickCrypto silently runs on a foreign OpenSSL. See
+  # scripts/build-openssl-apple.sh and issue #1059.
+  #
+  # Downloaded during podspec evaluation rather than in prepare_command, because
+  # prepare_command is skipped for :path pods.
+  openssl_version = "3.6.2"
+  openssl_sha256 = "a50e3c8473b0526b159ad8d105e97a90d1153a4a230388cc731ee23a7d0ad3a4"
+  openssl_dir = File.join(__dir__, "ios", "openssl")
+  openssl_prefix_header = File.join(openssl_dir, "quickcrypto_openssl_prefix.h")
+
+  unless File.exist?(openssl_prefix_header)
+    if openssl_sha256 == "REPLACE_WITH_RELEASE_SHA256"
+      raise "[QuickCrypto] openssl_sha256 is unset — publish the openssl-apple-#{openssl_version} release and paste its checksum into QuickCrypto.podspec"
+    end
+
+    archive = File.join(__dir__, "ios", "QuickCryptoOpenSSL.zip")
+    url = "https://github.com/margelo/react-native-quick-crypto/releases/download/openssl-apple-#{openssl_version}/QuickCryptoOpenSSL-#{openssl_version}.zip"
+
+    Pod::UI.puts "[QuickCrypto] ⬇️  Downloading static OpenSSL #{openssl_version}..."
+    FileUtils.mkdir_p(File.join(__dir__, "ios"))
+    FileUtils.rm_rf(openssl_dir)
+    system("curl -sSfL --retry 3 --retry-all-errors --connect-timeout 30 --max-time 600 -o #{archive.shellescape} #{url.shellescape}") || raise("[QuickCrypto] Failed to download static OpenSSL")
+
+    actual = Digest::SHA256.file(archive).hexdigest
+    unless actual == openssl_sha256
+      File.delete(archive)
+      raise "[QuickCrypto] Static OpenSSL checksum mismatch: expected #{openssl_sha256}, got #{actual}"
+    end
+
+    system("unzip -q #{archive.shellescape} -d #{openssl_dir.shellescape}") || raise("[QuickCrypto] Failed to extract static OpenSSL")
+    File.delete(archive)
+    Pod::UI.puts "[QuickCrypto] ✅ Static OpenSSL ready"
+  end
+
+  sodium_enabled = ENV['SODIUM_ENABLED'] == '1'
+  Pod::UI.puts("[QuickCrypto]  🧂 has libsodium #{sodium_enabled ? "enabled" : "disabled"}!")
+
+  # Ensure libsodium source is present during podspec evaluation when enabled.
+  # This is necessary because prepare_command is skipped for :path pods.
+  if sodium_enabled
+    sodium_version = "1.0.22"
+    # The GitHub release asset, not download.libsodium.org's -stable tarball: the
+    # latter is regenerated from the stable branch, so no hash can be pinned to it.
+    sodium_sha256 = "adbdd8f16149e81ac6078a03aca6fc03b592b89ef7b5ed83841c086191be3349"
+    sodium_url = "https://github.com/jedisct1/libsodium/releases/download/#{sodium_version}-RELEASE/libsodium-#{sodium_version}.tar.gz"
+    sodium_dir = File.join(__dir__, "ios", "libsodium-stable")
+    sodium_header = File.join(sodium_dir, "src", "libsodium", "include", "sodium.h")
+    unless File.exist?(sodium_header)
+      ios_dir = File.join(__dir__, "ios")
+      archive = File.join(ios_dir, "libsodium.tar.gz")
+      extracted = File.join(ios_dir, "libsodium-#{sodium_version}")
+
+      FileUtils.mkdir_p(ios_dir)
+      FileUtils.rm_rf([sodium_dir, extracted])
+
+      Pod::UI.puts "[QuickCrypto] ⬇️  Downloading libsodium #{sodium_version} source..."
+      system("curl -sSfL --retry 3 --retry-all-errors --connect-timeout 30 --max-time 300 -o #{archive.shellescape} #{sodium_url.shellescape}") || raise("[QuickCrypto] Failed to download libsodium")
+
+      actual = Digest::SHA256.file(archive).hexdigest
+      unless actual == sodium_sha256
+        File.delete(archive)
+        raise "[QuickCrypto] libsodium checksum mismatch: expected #{sodium_sha256}, got #{actual}"
+      end
+
+      system("tar -xzf #{archive.shellescape} -C #{ios_dir.shellescape}") || raise("[QuickCrypto] Failed to extract libsodium")
+      File.rename(extracted, sodium_dir)
+      File.delete(archive)
+      Pod::UI.puts "[QuickCrypto] ✅ libsodium source ready"
+    end
+  end
+
+  if sodium_enabled
+    # Build libsodium from source for XSalsa20 cipher support
+    # CocoaPods packages are outdated (1.0.12) and SPM causes module conflicts
+    s.prepare_command = <<-CMD
+      set -e
+      # Clean up vendored OpenSSL.xcframework from pre-1.0.20 installs
+      rm -rf OpenSSL.xcframework
+      rm -f OpenSSL.xcframework.zip
+      # Build the libsodium source the podspec already downloaded and verified.
+      cd ios/libsodium-stable
+      ./configure --disable-shared --enable-static
+      make -j$(sysctl -n hw.ncpu)
+    CMD
+  else
+    s.prepare_command = <<-CMD
+      set -e
+      # Clean up libsodium if previously built
+      rm -rf ios/libsodium-stable
+      rm -f ios/libsodium.tar.gz
+      # Clean up vendored OpenSSL.xcframework from pre-1.0.20 installs
+      rm -rf OpenSSL.xcframework
+      rm -f OpenSSL.xcframework.zip
+    CMD
+  end
+
+  base_source_files = [
+    # implementation (Swift)
+    "ios/**/*.{swift}",
+    # ios (Objective-C++)
+    "ios/**/*.{h,m,mm}",
+    # implementation (C++)
+    "cpp/**/*.{hpp,cpp}",
+    # dependencies (C++) - ncrypto
+    "deps/ncrypto/include/**/*.{h}",
+    "deps/ncrypto/src/*.{cpp}",
+    # dependencies (C++) - simdutf
+    "deps/simdutf/include/**/*.{h}",
+    "deps/simdutf/src/simdutf.cpp",
+    # dependencies (C) - exclude BLAKE3 x86 SIMD files (only use portable + NEON for ARM)
+    "deps/blake3/c/*.{h,c}",
+    "deps/fastpbkdf2/*.{h,c}",
+  ]
+
+  # Exclude BLAKE3 x86-specific SIMD implementations (SSE2, SSE4.1, AVX2, AVX-512)
+  # These use Intel intrinsics that don't compile on ARM
+  # Also exclude example files, TBB files, test files, and non-C directories
+  s.exclude_files = [
+    # Prebuilt OpenSSL headers — reached through HEADER_SEARCH_PATHS, never
+    # compiled as sources. Must not glob the .xcframework alongside them:
+    # CocoaPods applies exclude_files to vendored_frameworks too, so a broader
+    # pattern here silently unlinks the library.
+    "ios/openssl/include/**/*",
+    "ios/openssl/quickcrypto_openssl_prefix.h",
+    "deps/blake3/c/blake3_sse2.c",
+    "deps/blake3/c/blake3_sse41.c",
+    "deps/blake3/c/blake3_avx2.c",
+    "deps/blake3/c/blake3_avx512.c",
+    "deps/blake3/c/blake3_sse2_x86-64_unix.S",
+    "deps/blake3/c/blake3_sse41_x86-64_unix.S",
+    "deps/blake3/c/blake3_avx2_x86-64_unix.S",
+    "deps/blake3/c/blake3_avx512_x86-64_unix.S",
+    "deps/blake3/c/blake3_sse2_x86-64_windows_gnu.S",
+    "deps/blake3/c/blake3_sse41_x86-64_windows_gnu.S",
+    "deps/blake3/c/blake3_avx2_x86-64_windows_gnu.S",
+    "deps/blake3/c/blake3_avx512_x86-64_windows_gnu.S",
+    "deps/blake3/c/blake3_sse2_x86-64_windows_msvc.asm",
+    "deps/blake3/c/blake3_sse41_x86-64_windows_msvc.asm",
+    "deps/blake3/c/blake3_avx2_x86-64_windows_msvc.asm",
+    "deps/blake3/c/blake3_avx512_x86-64_windows_msvc.asm",
+    "deps/blake3/c/main.c",
+    "deps/blake3/c/example.c",
+    "deps/blake3/c/example_tbb.c",
+    "deps/blake3/c/blake3_tbb.cpp",
+    # Exclude ncrypto version.h to avoid header name collision with libsodium's version.h
+    # (ncrypto.h includes it via relative path "ncrypto/version.h" which still resolves)
+    "deps/ncrypto/include/ncrypto/version.h",
+    # Exclude non-C parts of BLAKE3 repo (Rust, benchmarks, tools, etc.)
+    "deps/blake3/src/**/*",
+    "deps/blake3/b3sum/**/*",
+    "deps/blake3/benches/**/*",
+    "deps/blake3/reference_impl/**/*",
+    "deps/blake3/tools/**/*",
+    "deps/blake3/test_vectors/**/*",
+  ]
+
+  if sodium_enabled
+    base_source_files += ["ios/libsodium-stable/src/libsodium/**/*.{h,c}"]
+  end
+
+  s.source_files = base_source_files
+
+  xcconfig = {
+    # C++ compiler flags, mainly for folly.
+    "GCC_PREPROCESSOR_DEFINITIONS" => "$(inherited) FOLLY_NO_CONFIG FOLLY_CFG_NO_COROUTINES NCRYPTO_EVP_ONLY=1",
+    # Set C++ standard to C++20
+    "CLANG_CXX_LANGUAGE_STANDARD" => "c++20",
+    "CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES" => "YES",
+    # Exclude ARM NEON source when building x86_64 simulator (no NEON support).
+    "EXCLUDED_SOURCE_FILE_NAMES[sdk=iphonesimulator*][arch=x86_64]" => "deps/blake3/c/blake3_neon.c",
+    # Disable x86 SIMD intrinsics on iOS simulator — the .c implementation files are already
+    # excluded above, but blake3_dispatch.c still references the symbols unless these macros
+    # are defined. Mirrors the Android CMakeLists.txt approach (line 18-22).
+    "GCC_PREPROCESSOR_DEFINITIONS[sdk=iphonesimulator*][arch=x86_64]" => "$(inherited) BLAKE3_NO_AVX512 BLAKE3_NO_AVX2 BLAKE3_NO_SSE41 BLAKE3_NO_SSE2 NCRYPTO_EVP_ONLY=1"
+  }
+
+  # Every translation unit calls the renamed OpenSSL symbols. Missing a rename
+  # is a link error, never a silent bind to a foreign OpenSSL.
+  openssl_include = File.join(openssl_dir, "include")
+  force_include = "-include \"#{openssl_prefix_header}\""
+  xcconfig["OTHER_CFLAGS"] = "$(inherited) #{force_include}"
+  xcconfig["OTHER_CPLUSPLUSFLAGS"] = "$(inherited) #{force_include}"
+
+  # Add cpp subdirectories to header search paths
+  cpp_headers = [
+    # Absolute path as well as the pod-relative one: in monorepos the podspec is
+    # reached through a symlink but sources resolve to their real paths.
+    "\"$(PODS_TARGET_SRCROOT)/ios/openssl/include\"",
+    "\"#{openssl_include}\"",
+    "\"$(PODS_TARGET_SRCROOT)/cpp/utils\"",
+    "\"$(PODS_TARGET_SRCROOT)/cpp/hkdf\"",
+    "\"$(PODS_TARGET_SRCROOT)/cpp/dh\"",
+    "\"$(PODS_TARGET_SRCROOT)/cpp/ecdh\"",
+    "\"$(PODS_TARGET_SRCROOT)/cpp/turboshake\"",
+    "\"$(PODS_TARGET_SRCROOT)/nitrogen/generated/shared/c++\"",
+    "\"$(PODS_TARGET_SRCROOT)/deps/ncrypto/include\"",
+    "\"$(PODS_TARGET_SRCROOT)/deps/simdutf/include\"",
+    "\"$(PODS_TARGET_SRCROOT)/deps/simdutf/src\"",
+    "\"$(PODS_TARGET_SRCROOT)/deps/blake3/c\"",
+    "\"$(PODS_TARGET_SRCROOT)/deps/fastpbkdf2\""
+  ]
+
+  if sodium_enabled
+    # Use absolute path from __dir__ which resolves symlinks correctly.
+    # This is necessary in monorepo setups where the podspec is accessed via symlink
+    # but the source files are resolved to their real paths during compilation.
+    real_sodium_include = File.join(__dir__, "ios", "libsodium-stable", "src", "libsodium", "include")
+    sodium_headers = [
+      "\"$(PODS_TARGET_SRCROOT)/ios/libsodium-stable/src/libsodium/include\"",
+      "\"$(PODS_TARGET_SRCROOT)/ios/libsodium-stable/src/libsodium/include/sodium\"",
+      "\"#{real_sodium_include}\"",
+      "\"#{real_sodium_include}/sodium\""
+    ]
+    xcconfig["HEADER_SEARCH_PATHS"] = (cpp_headers + sodium_headers).join(' ')
+    xcconfig["GCC_PREPROCESSOR_DEFINITIONS"] = "$(inherited) FOLLY_NO_CONFIG FOLLY_CFG_NO_COROUTINES BLSALLOC_SODIUM=1 NCRYPTO_EVP_ONLY=1"
+  else
+    xcconfig["HEADER_SEARCH_PATHS"] = cpp_headers.join(' ')
+  end
+
+  s.pod_target_xcconfig = xcconfig
+
+  # Add all files generated by Nitrogen
+  load "nitrogen/generated/ios/QuickCrypto+autolinking.rb"
+  add_nitrogen_files(s)
+
+  s.vendored_frameworks = "ios/openssl/QuickCryptoOpenSSL.xcframework"
+
+  s.dependency "React-jsi"
+  s.dependency "React-callinvoker"
+
+  install_modules_dependencies(s)
+end

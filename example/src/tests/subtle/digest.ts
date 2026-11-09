@@ -1,0 +1,92 @@
+import { expect } from 'chai';
+import {
+  Buffer,
+  subtle,
+  ab2str,
+  toArrayBuffer,
+  type HashAlgorithm,
+  createHash,
+} from 'react-native-quick-crypto';
+import { test } from '../util';
+
+type Test = [HashAlgorithm, string, number];
+
+const SUITE = 'subtle.digest';
+test(SUITE, 'empty hash just works', async () => {
+  await subtle.digest('SHA-512', Buffer.alloc(0));
+});
+
+// Phase 3.5 regression: WebCrypto §18.4.4 mandates case-insensitive
+// algorithm name matching. The previous `normalizeAlgorithm` was a
+// no-op and lowercase strings reached `SUPPORTED_ALGORITHMS` set
+// comparisons which only accepted the canonical mixed-case form.
+test(SUITE, 'digest accepts lowercase algorithm name', async () => {
+  const expected = createHash('sha256').update(kData).digest().toString('hex');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const value = await subtle.digest('sha-256' as any, kData);
+  expect(ab2str(value)).to.equal(expected);
+});
+
+const kTests: Test[] = [
+  ['SHA-1', 'sha1', 160],
+  ['SHA-256', 'sha256', 256],
+  ['SHA-384', 'sha384', 384],
+  ['SHA-512', 'sha512', 512],
+  ['SHA3-256', 'sha3-256', 256],
+  ['SHA3-384', 'sha3-384', 384],
+  ['SHA3-512', 'sha3-512', 512],
+];
+
+const kData = toArrayBuffer(Buffer.from('hello'));
+
+kTests.forEach(([algorithm, legacyName, bitLength]) => {
+  test(SUITE, `hash: ${algorithm}`, async () => {
+    const checkValue = createHash(legacyName)
+      .update(kData)
+      .digest()
+      .toString('hex');
+
+    const values = await Promise.all([
+      subtle.digest({ name: algorithm }, kData),
+      subtle.digest({ name: algorithm, length: bitLength }, kData),
+      subtle.digest(algorithm, kData),
+      subtle.digest(algorithm, Buffer.from(kData)),
+    ]);
+
+    // Compare that the legacy crypto API and SubtleCrypto API
+    // produce the same results
+    values.forEach(v => {
+      expect(ab2str(v)).to.equal(checkValue);
+    });
+  });
+});
+
+// cSHAKE tests (XOF - extendable output functions)
+test(SUITE, 'hash: cSHAKE128', async () => {
+  const outputBytes = 32;
+  const checkValue = createHash('shake128', { outputLength: outputBytes })
+    .update(kData)
+    .digest()
+    .toString('hex');
+
+  // CShakeParams.outputLength is in bits per spec.
+  const result = await subtle.digest(
+    { name: 'cSHAKE128', outputLength: outputBytes * 8 },
+    kData,
+  );
+  expect(ab2str(result)).to.equal(checkValue);
+});
+
+test(SUITE, 'hash: cSHAKE256', async () => {
+  const outputBytes = 64;
+  const checkValue = createHash('shake256', { outputLength: outputBytes })
+    .update(kData)
+    .digest()
+    .toString('hex');
+
+  const result = await subtle.digest(
+    { name: 'cSHAKE256', outputLength: outputBytes * 8 },
+    kData,
+  );
+  expect(ab2str(result)).to.equal(checkValue);
+});

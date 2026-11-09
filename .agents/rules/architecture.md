@@ -1,0 +1,41 @@
+# Architecture Rules
+
+Always on.
+
+## Critical
+
+- Project: React Native Quick Crypto provides native crypto for React Native.
+- Bridge JS and C++ through Nitro Modules.
+- Node.js `crypto` compatibility matters where this package exposes polyfills.
+- API priority:
+  1. WebCrypto API for `subtle.*`.
+  2. Node.js `$REPOS/node/deps/ncrypto` for `crypto.*` polyfills.
+  3. `$REPOS/ncrypto` as the standalone ncrypto reference.
+- Before new crypto work, check Node.js `deps/ncrypto`; adapt to OpenSSL 3.6+ patterns.
+
+## Strict
+
+- Required stack: React Native, TypeScript, Nitro Modules, C++20+, OpenSSL 3.6+, Bun 1.3+.
+- Use modern patterns. Avoid legacy APIs.
+- Keep code minimal, modular, and self-documenting.
+- Avoid comments unless the code is complex enough to need them.
+- Tests run in the example React Native app, not a standard Node.js runner.
+
+## ncrypto fork maintenance
+
+- Keep ncrypto as a Git submodule pointing to `boorad/ncrypto`.
+- Keep the fork's `main` identical to `nodejs/ncrypto:main`.
+- Maintain RNQC's compatibility changes as one commit on a separate branch based on upstream `main`; pin that commit in RNQC.
+- Do not merge RNQC's compatibility branch into the fork's mirrored `main`. Preserve a backup ref before rewriting published history.
+
+## References
+
+- `$REPOS/node`: Node.js crypto/subtle reference.
+- `$REPOS/ncrypto`: OpenSSL abstraction and Node-derived crypto utilities.
+- `$REPOS/nitro`: Nitro bridging examples and iOS CI caching.
+- `$REPOS/spicy`: shared agent-workflow and Android E2E patterns only; RNQC's canonical runner remains the repository-local flow documented in `docs/local-e2e.md`.
+- Use local Nitro llms docs when available.
+
+## Output
+
+- When a rule materially affects a decision, mention the rule briefly.

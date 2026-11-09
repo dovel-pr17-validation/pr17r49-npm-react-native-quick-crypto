@@ -1,0 +1,29 @@
+{
+  "title": "API Reference",
+  "defaultOpen": true,
+  "pages": [
+    "index",
+    "install",
+    "argon2",
+    "blake3",
+    "certificate",
+    "cipher",
+    "diffie-hellman",
+    "ecdh",
+    "ed25519",
+    "hash",
+    "hkdf",
+    "hmac",
+    "keys",
+    "kmac",
+    "pbkdf2",
+    "pqc",
+    "public-cipher",
+    "random",
+    "scrypt",
+    "signing",
+    "subtle",
+    "utilities",
+    "x509"
+  ]
+}

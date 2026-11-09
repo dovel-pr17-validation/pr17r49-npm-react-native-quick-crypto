@@ -1,0 +1,103 @@
+{
+  "cxxNamespace": ["crypto"],
+  "ios": {
+    "iosModuleName": "QuickCrypto"
+  },
+  "android": {
+    "androidNamespace": ["crypto"],
+    "androidCxxLibName": "QuickCrypto"
+  },
+  "autolinking": {
+    "Argon2": {
+      "cpp": "HybridArgon2"
+    },
+    "Blake3": {
+      "cpp": "HybridBlake3"
+    },
+    "Certificate": {
+      "cpp": "HybridCertificate"
+    },
+    "Cipher": {
+      "cpp": "HybridCipher"
+    },
+    "CipherFactory": {
+      "cpp": "HybridCipherFactory"
+    },
+    "DhKeyPair": {
+      "cpp": "HybridDhKeyPair"
+    },
+    "DiffieHellman": {
+      "cpp": "HybridDiffieHellman"
+    },
+    "DsaKeyPair": {
+      "cpp": "HybridDsaKeyPair"
+    },
+    "ECDH": {
+      "cpp": "HybridECDH"
+    },
+    "EcKeyPair": {
+      "cpp": "HybridEcKeyPair"
+    },
+    "EdKeyPair": {
+      "cpp": "HybridEdKeyPair"
+    },
+    "Hash": {
+      "cpp": "HybridHash"
+    },
+    "Hkdf": {
+      "cpp": "HybridHkdf"
+    },
+    "Hmac": {
+      "cpp": "HybridHmac"
+    },
+    "Kmac": {
+      "cpp": "HybridKmac"
+    },
+    "KeyObjectHandle": {
+      "cpp": "HybridKeyObjectHandle"
+    },
+    "MlDsaKeyPair": {
+      "cpp": "HybridMlDsaKeyPair"
+    },
+    "MlKemKeyPair": {
+      "cpp": "HybridMlKemKeyPair"
+    },
+    "SlhDsaKeyPair": {
+      "cpp": "HybridSlhDsaKeyPair"
+    },
+    "Pbkdf2": {
+      "cpp": "HybridPbkdf2"
+    },
+    "Prime": {
+      "cpp": "HybridPrime"
+    },
+    "Random": {
+      "cpp": "HybridRandom"
+    },
+    "RsaCipher": {
+      "cpp": "HybridRsaCipher"
+    },
+    "RsaKeyPair": {
+      "cpp": "HybridRsaKeyPair"
+    },
+    "Scrypt": {
+      "cpp": "HybridScrypt"
+    },
+    "SignHandle": {
+      "cpp": "HybridSignHandle"
+    },
+    "TurboShake": {
+      "cpp": "HybridTurboShake"
+    },
+    "Utils": {
+      "cpp": "HybridUtils"
+    },
+    "VerifyHandle": {
+      "cpp": "HybridVerifyHandle"
+    },
+    "X509CertificateHandle": {
+      "cpp": "HybridX509Certificate"
+    }
+  },
+  "ignorePaths": ["node_modules", "lib"]
+}

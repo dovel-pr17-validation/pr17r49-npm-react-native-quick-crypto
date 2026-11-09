@@ -1,0 +1,501 @@
+import { expect } from 'chai';
+import type { WebCryptoKeyPair } from 'react-native-quick-crypto';
+import crypto, {
+  Buffer,
+  subtle,
+  ab2str,
+  type HashAlgorithm,
+  normalizeHashName,
+  KeyObject,
+} from 'react-native-quick-crypto';
+import { test } from '../util';
+
+type TestFixture = [
+  string,
+  string,
+  number,
+  HashAlgorithm | string,
+  number,
+  string,
+];
+
+const SUITE = 'subtle.deriveBits';
+
+// pbkdf2 deriveBits()
+// {
+const test_fn = async (
+  pass: string,
+  salt: string,
+  iterations: number,
+  hash: HashAlgorithm | string,
+  length: number,
+  expected: string,
+) => {
+  const key = await subtle.importKey(
+    'raw',
+    pass,
+    { name: 'PBKDF2', hash: normalizeHashName(hash) },
+    false,
+    ['deriveBits'],
+  );
+
+  const bits = await subtle.deriveBits(
+    {
+      name: 'PBKDF2',
+      salt,
+      iterations,
+      hash: normalizeHashName(hash),
+    },
+    key,
+    length,
+  );
+  expect(ab2str(bits)).to.equal(expected);
+};
+
+const kTests: TestFixture[] = [
+  [
+    'hello',
+    'there',
+    10,
+    'SHA-256',
+    512,
+    'f72d1cf4853fffbd16a42751765d11f8dc7939498ee7b7' +
+      'ce7678b4cb16fad88098110a83e71f4483ce73203f7a64' +
+      '719d293280f780f9fafdcf46925c5c0588b3',
+  ],
+  ['hello', 'there', 5, 'SHA-384', 128, '201509b012c9cd2fbe7ea938f0c509b3'],
+];
+
+kTests.forEach(async ([pass, salt, iterations, hash, length, expected]) => {
+  test(
+    SUITE,
+    `PBKDF2 importKey raw/deriveBits - ${pass} ${salt} ${iterations} ${hash} ${length}`,
+    async () => {
+      await test_fn(pass, salt, iterations, hash, length, expected);
+    },
+  );
+});
+
+// --- X25519 deriveBits Tests (from cfrg suite) ---
+
+test(SUITE, 'x25519 - shared secret', () => {
+  const alice = crypto.generateKeyPairSync('x25519', {});
+  const bob = crypto.generateKeyPairSync('x25519', {});
+
+  const sharedSecret = crypto.diffieHellman({
+    privateKey: alice.privateKey as KeyObject,
+    publicKey: bob.publicKey as KeyObject,
+  });
+  expect(Buffer.isBuffer(sharedSecret)).to.equal(true);
+});
+
+test(SUITE, 'x25519 - shared secret symmetry', () => {
+  const alice = crypto.generateKeyPairSync('x25519', {});
+  const bob = crypto.generateKeyPairSync('x25519', {});
+
+  const sharedSecretAlice = crypto.diffieHellman({
+    privateKey: alice.privateKey as KeyObject,
+    publicKey: bob.publicKey as KeyObject,
+  }) as Buffer;
+
+  const sharedSecretBob = crypto.diffieHellman({
+    privateKey: bob.privateKey as KeyObject,
+    publicKey: alice.publicKey as KeyObject,
+  }) as Buffer;
+
+  expect(Buffer.isBuffer(sharedSecretAlice)).to.equal(true);
+  expect(Buffer.isBuffer(sharedSecretBob)).to.equal(true);
+  expect(sharedSecretAlice.equals(sharedSecretBob)).to.equal(true);
+});
+
+test(SUITE, 'x25519 - shared secret properties', () => {
+  const alice = crypto.generateKeyPairSync('x25519', {});
+  const bob = crypto.generateKeyPairSync('x25519', {});
+
+  const sharedSecret = crypto.diffieHellman({
+    privateKey: alice.privateKey as KeyObject,
+    publicKey: bob.publicKey as KeyObject,
+  }) as Buffer;
+
+  expect(sharedSecret.length).to.equal(32);
+
+  const allZeros = Buffer.alloc(32, 0);
+  expect(sharedSecret.equals(allZeros)).to.equal(false);
+
+  const sharedSecret2 = crypto.diffieHellman({
+    privateKey: alice.privateKey as KeyObject,
+    publicKey: bob.publicKey as KeyObject,
+  }) as Buffer;
+  expect(sharedSecret.equals(sharedSecret2)).to.equal(true);
+});
+
+test(SUITE, 'x25519 - different key pairs produce different secrets', () => {
+  const alice = crypto.generateKeyPairSync('x25519', {});
+  const bob = crypto.generateKeyPairSync('x25519', {});
+  const charlie = crypto.generateKeyPairSync('x25519', {});
+
+  const secretAliceBob = crypto.diffieHellman({
+    privateKey: alice.privateKey as KeyObject,
+    publicKey: bob.publicKey as KeyObject,
+  }) as Buffer;
+
+  const secretAliceCharlie = crypto.diffieHellman({
+    privateKey: alice.privateKey as KeyObject,
+    publicKey: charlie.publicKey as KeyObject,
+  }) as Buffer;
+
+  expect(secretAliceBob.equals(secretAliceCharlie)).to.equal(false);
+});
+
+test(SUITE, 'x25519 - error handling', () => {
+  const alice = crypto.generateKeyPairSync('x25519', {});
+
+  expect(() => {
+    crypto.diffieHellman({
+      privateKey: alice.privateKey as KeyObject,
+      publicKey: {} as KeyObject,
+    });
+  }).to.throw();
+});
+
+// --- ECDH subtle.deriveBits Tests ---
+
+import type { NamedCurve } from 'react-native-quick-crypto';
+import { createPrivateKey, createPublicKey } from 'react-native-quick-crypto';
+
+const ecdhCurves: Array<{ curve: NamedCurve; bitLen: number }> = [
+  { curve: 'P-256', bitLen: 256 },
+  { curve: 'P-384', bitLen: 384 },
+  { curve: 'P-521', bitLen: 528 },
+];
+
+for (const { curve, bitLen } of ecdhCurves) {
+  test(SUITE, `ECDH deriveBits - ${curve}`, async () => {
+    const alice = (await subtle.generateKey(
+      { name: 'ECDH', namedCurve: curve },
+      true,
+      ['deriveBits'],
+    )) as WebCryptoKeyPair;
+    const bob = (await subtle.generateKey(
+      { name: 'ECDH', namedCurve: curve },
+      true,
+      ['deriveBits'],
+    )) as WebCryptoKeyPair;
+
+    const bits = await subtle.deriveBits(
+      { name: 'ECDH', public: bob.publicKey },
+      alice.privateKey,
+      bitLen,
+    );
+    expect(bits).to.be.an.instanceOf(ArrayBuffer);
+    expect(bits.byteLength).to.equal(bitLen / 8);
+  });
+
+  test(SUITE, `ECDH deriveBits symmetry - ${curve}`, async () => {
+    const alice = (await subtle.generateKey(
+      { name: 'ECDH', namedCurve: curve },
+      true,
+      ['deriveBits'],
+    )) as WebCryptoKeyPair;
+    const bob = (await subtle.generateKey(
+      { name: 'ECDH', namedCurve: curve },
+      true,
+      ['deriveBits'],
+    )) as WebCryptoKeyPair;
+
+    const aliceBits = await subtle.deriveBits(
+      { name: 'ECDH', public: bob.publicKey },
+      alice.privateKey,
+      bitLen,
+    );
+    const bobBits = await subtle.deriveBits(
+      { name: 'ECDH', public: alice.publicKey },
+      bob.privateKey,
+      bitLen,
+    );
+
+    expect(Buffer.from(aliceBits).equals(Buffer.from(bobBits))).to.equal(true);
+  });
+}
+
+// --- ECDH deriveBits truncation tests (regression for #946) ---
+// When the curve's shared secret is larger than the requested bit length,
+// the result must be properly truncated (not return the full backing buffer).
+const truncationTests: Array<{
+  curve: NamedCurve;
+  fullBitLen: number;
+  requestBitLen: number;
+}> = [
+  { curve: 'P-384', fullBitLen: 384, requestBitLen: 256 },
+  { curve: 'P-384', fullBitLen: 384, requestBitLen: 128 },
+  { curve: 'P-521', fullBitLen: 528, requestBitLen: 256 },
+  { curve: 'P-521', fullBitLen: 528, requestBitLen: 128 },
+];
+
+for (const { curve, fullBitLen, requestBitLen } of truncationTests) {
+  test(
+    SUITE,
+    `ECDH deriveBits truncation - ${curve} ${requestBitLen} bits`,
+    async () => {
+      const alice = (await subtle.generateKey(
+        { name: 'ECDH', namedCurve: curve },
+        true,
+        ['deriveBits'],
+      )) as WebCryptoKeyPair;
+      const bob = (await subtle.generateKey(
+        { name: 'ECDH', namedCurve: curve },
+        true,
+        ['deriveBits'],
+      )) as WebCryptoKeyPair;
+
+      // Get full-length secret
+      const fullBits = await subtle.deriveBits(
+        { name: 'ECDH', public: bob.publicKey },
+        alice.privateKey,
+        fullBitLen,
+      );
+
+      // Get truncated secret
+      const truncBits = await subtle.deriveBits(
+        { name: 'ECDH', public: bob.publicKey },
+        alice.privateKey,
+        requestBitLen,
+      );
+
+      expect(truncBits.byteLength).to.equal(requestBitLen / 8);
+
+      // Truncated result must be a prefix of the full result
+      const fullPrefix = Buffer.from(fullBits).subarray(0, requestBitLen / 8);
+      expect(Buffer.from(truncBits).toString('hex')).to.equal(
+        fullPrefix.toString('hex'),
+      );
+    },
+  );
+}
+
+// --- X448 diffieHellman Tests ---
+
+test(SUITE, 'x448 - shared secret', () => {
+  const alice = crypto.generateKeyPairSync('x448', {});
+  const bob = crypto.generateKeyPairSync('x448', {});
+
+  const sharedSecret = crypto.diffieHellman({
+    privateKey: alice.privateKey as KeyObject,
+    publicKey: bob.publicKey as KeyObject,
+  });
+  expect(Buffer.isBuffer(sharedSecret)).to.equal(true);
+});
+
+test(SUITE, 'x448 - shared secret symmetry', () => {
+  const alice = crypto.generateKeyPairSync('x448', {});
+  const bob = crypto.generateKeyPairSync('x448', {});
+
+  const sharedSecretAlice = crypto.diffieHellman({
+    privateKey: alice.privateKey as KeyObject,
+    publicKey: bob.publicKey as KeyObject,
+  }) as Buffer;
+
+  const sharedSecretBob = crypto.diffieHellman({
+    privateKey: bob.privateKey as KeyObject,
+    publicKey: alice.publicKey as KeyObject,
+  }) as Buffer;
+
+  expect(Buffer.isBuffer(sharedSecretAlice)).to.equal(true);
+  expect(Buffer.isBuffer(sharedSecretBob)).to.equal(true);
+  expect(sharedSecretAlice.equals(sharedSecretBob)).to.equal(true);
+});
+
+test(SUITE, 'x448 - shared secret properties', () => {
+  const alice = crypto.generateKeyPairSync('x448', {});
+  const bob = crypto.generateKeyPairSync('x448', {});
+
+  const sharedSecret = crypto.diffieHellman({
+    privateKey: alice.privateKey as KeyObject,
+    publicKey: bob.publicKey as KeyObject,
+  }) as Buffer;
+
+  expect(sharedSecret.length).to.equal(56);
+
+  const allZeros = Buffer.alloc(56, 0);
+  expect(sharedSecret.equals(allZeros)).to.equal(false);
+
+  const sharedSecret2 = crypto.diffieHellman({
+    privateKey: alice.privateKey as KeyObject,
+    publicKey: bob.publicKey as KeyObject,
+  }) as Buffer;
+  expect(sharedSecret.equals(sharedSecret2)).to.equal(true);
+});
+
+test(SUITE, 'x448 - different key pairs produce different secrets', () => {
+  const alice = crypto.generateKeyPairSync('x448', {});
+  const bob = crypto.generateKeyPairSync('x448', {});
+  const charlie = crypto.generateKeyPairSync('x448', {});
+
+  const secretAliceBob = crypto.diffieHellman({
+    privateKey: alice.privateKey as KeyObject,
+    publicKey: bob.publicKey as KeyObject,
+  }) as Buffer;
+
+  const secretAliceCharlie = crypto.diffieHellman({
+    privateKey: alice.privateKey as KeyObject,
+    publicKey: charlie.publicKey as KeyObject,
+  }) as Buffer;
+
+  expect(secretAliceBob.equals(secretAliceCharlie)).to.equal(false);
+});
+
+test(SUITE, 'x448 - error handling', () => {
+  const alice = crypto.generateKeyPairSync('x448', {});
+
+  expect(() => {
+    crypto.diffieHellman({
+      privateKey: alice.privateKey as KeyObject,
+      publicKey: {} as KeyObject,
+    });
+  }).to.throw();
+});
+
+// --- EC diffieHellman Tests (regression for #959) ---
+
+const ecDhCurves: Array<{ curve: string; secretLen: number }> = [
+  { curve: 'P-256', secretLen: 32 },
+  { curve: 'P-384', secretLen: 48 },
+  { curve: 'P-521', secretLen: 66 },
+];
+
+function generateEcKeyObjects(curve: string) {
+  const { privateKey, publicKey } = crypto.generateKeyPairSync('ec', {
+    namedCurve: curve,
+    publicKeyEncoding: { type: 'spki', format: 'pem' },
+    privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+  });
+  return {
+    privateKey: createPrivateKey(privateKey as string),
+    publicKey: createPublicKey(publicKey as string),
+  };
+}
+
+for (const { curve, secretLen } of ecDhCurves) {
+  test(SUITE, `EC diffieHellman - ${curve} shared secret`, () => {
+    const alice = generateEcKeyObjects(curve);
+    const bob = generateEcKeyObjects(curve);
+
+    const secret = crypto.diffieHellman({
+      privateKey: alice.privateKey,
+      publicKey: bob.publicKey,
+    }) as Buffer;
+
+    expect(Buffer.isBuffer(secret)).to.equal(true);
+    expect(secret.length).to.equal(secretLen);
+
+    const allZeros = Buffer.alloc(secretLen, 0);
+    expect(secret.equals(allZeros)).to.equal(false);
+  });
+
+  test(SUITE, `EC diffieHellman - ${curve} symmetry`, () => {
+    const alice = generateEcKeyObjects(curve);
+    const bob = generateEcKeyObjects(curve);
+
+    const secretAlice = crypto.diffieHellman({
+      privateKey: alice.privateKey,
+      publicKey: bob.publicKey,
+    }) as Buffer;
+
+    const secretBob = crypto.diffieHellman({
+      privateKey: bob.privateKey,
+      publicKey: alice.publicKey,
+    }) as Buffer;
+
+    expect(secretAlice.equals(secretBob)).to.equal(true);
+  });
+
+  test(SUITE, `EC diffieHellman - ${curve} deterministic`, () => {
+    const alice = generateEcKeyObjects(curve);
+    const bob = generateEcKeyObjects(curve);
+
+    const secret1 = crypto.diffieHellman({
+      privateKey: alice.privateKey,
+      publicKey: bob.publicKey,
+    }) as Buffer;
+
+    const secret2 = crypto.diffieHellman({
+      privateKey: alice.privateKey,
+      publicKey: bob.publicKey,
+    }) as Buffer;
+
+    expect(secret1.equals(secret2)).to.equal(true);
+  });
+
+  test(
+    SUITE,
+    `EC diffieHellman - ${curve} different pairs produce different secrets`,
+    () => {
+      const alice = generateEcKeyObjects(curve);
+      const bob = generateEcKeyObjects(curve);
+      const charlie = generateEcKeyObjects(curve);
+
+      const secretBob = crypto.diffieHellman({
+        privateKey: alice.privateKey,
+        publicKey: bob.publicKey,
+      }) as Buffer;
+
+      const secretCharlie = crypto.diffieHellman({
+        privateKey: alice.privateKey,
+        publicKey: charlie.publicKey,
+      }) as Buffer;
+
+      expect(secretBob.equals(secretCharlie)).to.equal(false);
+    },
+  );
+}
+
+test(SUITE, 'EC diffieHellman - curve mismatch throws', () => {
+  const alice = generateEcKeyObjects('P-256');
+  const bob = generateEcKeyObjects('P-384');
+
+  expect(() => {
+    crypto.diffieHellman({
+      privateKey: alice.privateKey,
+      publicKey: bob.publicKey,
+    });
+  }).to.throw('Private and public key curves do not match');
+});
+
+// Phase 3.5 regression: subtle.deriveBits MUST require the literal
+// "deriveBits" usage on the base key (WebCrypto §SubtleCrypto-method
+// -deriveBits step 11). The previous implementation accepted "deriveKey"
+// usage as a substitute, which silently allowed callers to bypass the
+// usage gate.
+test(
+  SUITE,
+  'deriveBits: rejects baseKey without deriveBits usage',
+  async () => {
+    const ikm = Buffer.from('deadbeef'.repeat(8), 'hex');
+    const key = await subtle.importKey(
+      'raw',
+      ikm,
+      { name: 'PBKDF2' },
+      false,
+      ['deriveKey'], // intentionally NOT 'deriveBits'
+    );
+
+    let threw: Error | undefined;
+    try {
+      await subtle.deriveBits(
+        {
+          name: 'PBKDF2',
+          salt: 'salt',
+          iterations: 10,
+          hash: 'SHA-256',
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any,
+        key,
+        256,
+      );
+    } catch (e) {
+      threw = e as Error;
+    }
+    expect(threw).to.not.equal(undefined);
+    expect(threw!.message).to.match(/deriveBits usage/);
+  },
+);

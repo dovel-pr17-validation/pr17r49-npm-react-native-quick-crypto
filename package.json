@@ -1,0 +1,109 @@
+{
+  "version": "1.1.9",
+  "type": "module",
+  "scripts": {
+    "clang-format": "./scripts/clang-format.sh",
+    "clean": "bun --filter='*' clean",
+    "clean:deep": "bun --filter='*' clean:deep && del-cli node_modules",
+    "specs": "bun --filter='react-native-quick-crypto' specs",
+    "bundle-install": "bun --filter='react-native-quick-crypto-example' bundle-install",
+    "pods": "bun --filter='react-native-quick-crypto-example' pods",
+    "start": "bun --cwd example start",
+    "e2e:android": "bun --cwd example e2e:android",
+    "e2e:ios": "bun --cwd example e2e:ios",
+    "postinstall": "git submodule update --init --recursive 2>/dev/null || true",
+    "bootstrap": "bun install && bun pods",
+    "tsc": "bun --filter='*' typescript",
+    "lint": "bun --filter='*' lint",
+    "lint:fix": "bun --filter='*' lint:fix",
+    "format": "bun --filter='*' format",
+    "format:fix": "bun --filter='*' format:fix",
+    "prepare": "husky && bun --filter='react-native-quick-crypto' prepare",
+    "lint-staged": "lint-staged --no-stash",
+    "release": "./scripts/release.sh"
+  },
+  "lint-staged": {
+    "example/**/*.{js,jsx,ts,tsx}": [
+      "bun lint",
+      "bun format"
+    ],
+    "packages/react-native-quick-crypto/**/*.{js,jsx,ts,tsx}": [
+      "bun lint",
+      "bun format"
+    ]
+  },
+  "devDependencies": {
+    "@eslint/compat": "2.1.0",
+    "@eslint/js": "9.24.0",
+    "@release-it/bumper": "7.0.5",
+    "@release-it/conventional-changelog": "10.0.1",
+    "@types/node": "24.10.1",
+    "@typescript-eslint/eslint-plugin": "8.43.0",
+    "@typescript-eslint/parser": "8.43.0",
+    "eslint": "9.24.0",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-prettier": "5.5.4",
+    "eslint-plugin-react-native": "5.0.0",
+    "husky": "9.1.7",
+    "lint-staged": "16.1.6",
+    "nitrogen": "0.33.2",
+    "prettier": "3.5.3",
+    "release-it": "20.0.1",
+    "typescript": "5.8.3",
+    "typescript-eslint": "8.43.0"
+  },
+  "packageManager": "bun@1.2.0",
+  "release-it": {
+    "npm": {
+      "publish": false
+    },
+    "git": {
+      "commitMessage": "chore: release ${version}",
+      "tagName": "v${version}",
+      "tagMatch": "v*",
+      "requireCleanWorkingDir": false
+    },
+    "github": {
+      "release": true
+    },
+    "hooks": {
+      "before:release": "bun bundle-install && bun pods && git add example/ios/Podfile.lock bun.lock"
+    },
+    "plugins": {
+      "@release-it/conventional-changelog": {
+        "preset": {
+          "name": "conventionalcommits",
+          "types": [
+            {
+              "type": "feat",
+              "section": "✨ Features"
+            },
+            {
+              "type": "perf",
+              "section": "💨 Performance Improvements"
+            },
+            {
+              "type": "fix",
+              "section": "🐛 Bug Fixes"
+            },
+            {
+              "type": "chore(deps)",
+              "section": "🛠️ Dependency Upgrades"
+            },
+            {
+              "type": "docs",
+              "section": "📚 Documentation"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "workspaces": [
+    "packages/react-native-quick-crypto",
+    "example"
+  ],
+  "dependencies": {
+    "caniuse-lite": "1.0.30001757"
+  }
+}

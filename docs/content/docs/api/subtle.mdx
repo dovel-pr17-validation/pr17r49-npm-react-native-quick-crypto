@@ -1,0 +1,437 @@
+---
+title: Subtle (WebCrypto)
+description: W3C Web Cryptography API
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { TypeTable } from 'fumadocs-ui/components/type-table';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+The `SubtleCrypto` interface allows you to perform cryptographic operations using the standardized W3C Web Cryptography API.
+
+## Table of Contents
+
+- [Theory](#theory)
+- [Module Methods](#module-methods)
+- [Supported Algorithms](#supported-algorithms)
+- [Real-World Examples](#real-world-examples)
+
+## Theory
+
+The WebCrypto API differs from the Node.js API in two main ways:
+
+1.  **Asynchronous Promises**: All operations (`encrypt`, `verify`, etc.) return Promises. This reflects the intense nature of crypto operations and prevents UI blocking.
+2.  **Unextractable Keys**: A `CryptoKey` object is a handle to a key. If marked `extractable: false`, the raw key bytes can never be accessed by JavaScript code, protecting it from XSS attacks.
+
+---
+
+## Module Methods
+
+### encrypt(algorithm, key, data)
+
+Encrypts data.
+
+**Parameters:**
+
+<TypeTable
+  type={{
+    algorithm: {
+      description: 'Params (e.g. { name: "AES-GCM", iv: ... }).',
+      type: 'Object',
+    },
+    key: { description: 'The CryptoKey.', type: 'CryptoKey' },
+    data: { description: 'Data to encrypt.', type: 'BufferSource' },
+  }}
+/>
+
+**Supported algorithms:** `AES-CTR`, `AES-CBC`, `AES-GCM`, `AES-OCB`, `ChaCha20-Poly1305`, `RSA-OAEP`
+
+### decrypt(algorithm, key, data)
+
+Decrypts data. Supports the same algorithms as `encrypt`.
+
+### sign(algorithm, key, data)
+
+Generates a digital signature.
+
+**Supported algorithms:** `ECDSA`, `Ed25519`, `Ed448`, `HMAC`, `KMAC128`, `KMAC256`, `ML-DSA-44`, `ML-DSA-65`, `ML-DSA-87`, `RSA-PSS`, `RSASSA-PKCS1-v1_5`, `SLH-DSA-SHA2-{128,192,256}{s,f}`, `SLH-DSA-SHAKE-{128,192,256}{s,f}`
+
+### verify(algorithm, key, signature, data)
+
+Verifies a digital signature. Returns `true` or `false`. Supports the same algorithms as `sign`.
+
+### digest(algorithm, data)
+
+Generates a hash digest.
+
+**Supported algorithms:** `SHA-1`, `SHA-256`, `SHA-384`, `SHA-512`, `SHA3-256`, `SHA3-384`, `SHA3-512`, `cSHAKE128`, `cSHAKE256`
+
+<Callout type="info">
+  `cSHAKE128` and `cSHAKE256` provide SHAKE XOF (Extendable Output Function)
+  support. The `length` parameter (in bytes) is required to specify the output
+  length.
+</Callout>
+
+```ts
+// SHA3-256
+const hash = await subtle.digest('SHA3-256', data);
+
+// cSHAKE256 with custom output length
+const xof = await subtle.digest({ name: 'cSHAKE256', length: 64 }, data);
+```
+
+### generateKey(algorithm, extractable, keyUsages)
+
+Generates a new key or key pair.
+
+**Example (RSA-OAEP):**
+
+```ts
+const keyPair = await subtle.generateKey(
+  {
+    name: 'RSA-OAEP',
+    modulusLength: 4096,
+    publicExponent: new Uint8Array([1, 0, 1]),
+    hash: 'SHA-256',
+  },
+  true,
+  ['encrypt', 'decrypt'],
+);
+```
+
+### importKey(format, keyData, algorithm, extractable, keyUsages)
+
+Imports a key. Supported formats: `raw`, `raw-secret`, `raw-public`, `raw-seed`, `pkcs8`, `spki`, `jwk`.
+
+### exportKey(format, key)
+
+Exports a key (if extractable). Supported formats match `importKey`.
+
+### deriveBits(algorithm, baseKey, length)
+
+Derives raw bits from a key using a key derivation algorithm.
+
+**Parameters:**
+
+<TypeTable
+  type={{
+    algorithm: {
+      description: 'Derivation params (name, salt, iterations, etc.).',
+      type: 'Object',
+    },
+    baseKey: {
+      description: 'The base CryptoKey for derivation.',
+      type: 'CryptoKey',
+    },
+    length: { description: 'Number of bits to derive.', type: 'number' },
+  }}
+/>
+
+**Supported algorithms:** `PBKDF2`, `HKDF`, `Argon2d`, `Argon2i`, `Argon2id`, `ECDH`, `X25519`, `X448`
+
+```ts
+// PBKDF2
+const passwordKey = await subtle.importKey(
+  'raw',
+  new TextEncoder().encode('password'),
+  'PBKDF2',
+  false,
+  ['deriveBits'],
+);
+
+const bits = await subtle.deriveBits(
+  {
+    name: 'PBKDF2',
+    salt: crypto.getRandomValues(new Uint8Array(16)),
+    iterations: 600000,
+    hash: 'SHA-256',
+  },
+  passwordKey,
+  256,
+);
+```
+
+```ts
+// HKDF
+const ikmKey = await subtle.importKey('raw', masterSecret, 'HKDF', false, [
+  'deriveBits',
+]);
+
+const derived = await subtle.deriveBits(
+  {
+    name: 'HKDF',
+    hash: 'SHA-256',
+    salt: new Uint8Array(32),
+    info: new TextEncoder().encode('session-key'),
+  },
+  ikmKey,
+  256,
+);
+```
+
+```ts
+// X25519 ECDH
+const aliceKey = await subtle.generateKey({ name: 'X25519' }, true, [
+  'deriveBits',
+]);
+
+const sharedBits = await subtle.deriveBits(
+  { name: 'X25519', public: bobPublicKey },
+  aliceKey.privateKey,
+  256,
+);
+```
+
+### deriveKey(algorithm, baseKey, derivedKeyAlgorithm, extractable, keyUsages)
+
+Derives a new `CryptoKey` from a base key. Same derivation algorithms as `deriveBits`, but produces a usable key directly.
+
+```ts
+// Derive an AES key from a password using PBKDF2
+const aesKey = await subtle.deriveKey(
+  {
+    name: 'PBKDF2',
+    salt: crypto.getRandomValues(new Uint8Array(16)),
+    iterations: 600000,
+    hash: 'SHA-256',
+  },
+  passwordKey,
+  { name: 'AES-GCM', length: 256 },
+  true,
+  ['encrypt', 'decrypt'],
+);
+```
+
+### wrapKey(format, key, wrappingKey, wrapAlgo)
+
+Exports a key and encrypts (wraps) it for safe transport.
+
+**Parameters:**
+
+<TypeTable
+  type={{
+    format: {
+      description: 'Export format for the key being wrapped.',
+      type: '"raw" | "pkcs8" | "spki" | "jwk"',
+    },
+    key: { description: 'The key to wrap.', type: 'CryptoKey' },
+    wrappingKey: {
+      description: 'Key used for wrapping (encryption).',
+      type: 'CryptoKey',
+    },
+    wrapAlgo: { description: 'Wrapping algorithm params.', type: 'Object' },
+  }}
+/>
+
+**Wrapping algorithms:** `AES-KW`, `AES-CBC`, `AES-CTR`, `AES-GCM`, `AES-OCB`, `ChaCha20-Poly1305`, `RSA-OAEP`
+
+```ts
+// Wrap an AES key with AES-KW
+const wrappingKey = await subtle.generateKey(
+  { name: 'AES-KW', length: 256 },
+  true,
+  ['wrapKey', 'unwrapKey'],
+);
+
+const keyToWrap = await subtle.generateKey(
+  { name: 'AES-GCM', length: 256 },
+  true,
+  ['encrypt', 'decrypt'],
+);
+
+const wrapped = await subtle.wrapKey('raw', keyToWrap, wrappingKey, {
+  name: 'AES-KW',
+});
+```
+
+### unwrapKey(format, wrappedKey, unwrappingKey, unwrapAlgo, unwrappedKeyAlgo, extractable, keyUsages)
+
+Decrypts (unwraps) a wrapped key and imports it.
+
+```ts
+const unwrapped = await subtle.unwrapKey(
+  'raw',
+  wrapped,
+  wrappingKey,
+  { name: 'AES-KW' },
+  { name: 'AES-GCM', length: 256 },
+  true,
+  ['encrypt', 'decrypt'],
+);
+```
+
+### getPublicKey(key, keyUsages)
+
+Extracts the public key from a private `CryptoKey`.
+
+```ts
+const keyPair = await subtle.generateKey(
+  { name: 'ECDSA', namedCurve: 'P-256' },
+  true,
+  ['sign', 'verify'],
+);
+
+const publicOnly = await subtle.getPublicKey(keyPair.privateKey, ['verify']);
+```
+
+### SubtleCrypto.supports(operation, algorithm[, lengthOrAdditionalAlgorithm])
+
+Static method that checks if a given operation/algorithm combination is supported.
+
+```ts
+const canSign = SubtleCrypto.supports('sign', 'Ed25519');
+const canEncrypt = SubtleCrypto.supports('encrypt', 'AES-GCM', 256);
+```
+
+### Encapsulation (ML-KEM)
+
+Post-quantum key encapsulation methods for ML-KEM. See the [PQC page](/docs/api/pqc) for full details.
+
+- `encapsulateBits(algorithm, key)` — Encapsulates and returns `{ sharedSecret, ciphertext }`
+- `encapsulateKey(algorithm, key, sharedKeyAlgo, extractable, usages)` — Encapsulates and returns a derived `CryptoKey`
+- `decapsulateBits(algorithm, key, ciphertext)` — Decapsulates to raw bits
+- `decapsulateKey(algorithm, key, ciphertext, sharedKeyAlgo, extractable, usages)` — Decapsulates to a `CryptoKey`
+
+---
+
+## Supported Algorithms
+
+### Encryption/Decryption
+
+| Algorithm           | Type       | Notes                                      |
+| :------------------ | :--------- | :----------------------------------------- |
+| `AES-CBC`           | Symmetric  | Block cipher, requires padding             |
+| `AES-CTR`           | Symmetric  | Stream-like, counter mode                  |
+| `AES-GCM`           | Symmetric  | **Recommended** — authenticated encryption |
+| `AES-OCB`           | Symmetric  | Authenticated, faster than GCM             |
+| `ChaCha20-Poly1305` | Symmetric  | Authenticated, fast on mobile              |
+| `RSA-OAEP`          | Asymmetric | For small payloads or key wrapping         |
+
+### Signing/Verification
+
+| Algorithm                                 | Type         | Notes                                        |
+| :---------------------------------------- | :----------- | :------------------------------------------- |
+| `ECDSA`                                   | Asymmetric   | P-256, P-384, P-521, secp256k1               |
+| `Ed25519`                                 | Asymmetric   | Fast, deterministic                          |
+| `Ed448`                                   | Asymmetric   | Higher security Ed curve                     |
+| `HMAC`                                    | Symmetric    | Message authentication                       |
+| `KMAC128` / `KMAC256`                     | Symmetric    | Keccak-based MAC                             |
+| `ML-DSA-44/65/87`                         | Post-Quantum | FIPS 204 lattice signatures                  |
+| `RSA-PSS`                                 | Asymmetric   | Probabilistic RSA signatures                 |
+| `RSASSA-PKCS1-v1_5`                       | Asymmetric   | Legacy RSA signatures                        |
+| `SLH-DSA-{SHA2,SHAKE}-{128,192,256}{s,f}` | Post-Quantum | FIPS 205 hash-based signatures (12 variants) |
+
+### Key Derivation
+
+| Algorithm      | Input        | Notes                              |
+| :------------- | :----------- | :--------------------------------- |
+| `PBKDF2`       | Password     | Iterations-based, widely supported |
+| `HKDF`         | Key material | Extract-and-Expand (RFC 5869)      |
+| `Argon2d/i/id` | Password     | Memory-hard, PHC winner            |
+| `ECDH`         | Key pair     | P-256, P-384, P-521, secp256k1     |
+| `X25519`       | Key pair     | Modern ECDH                        |
+| `X448`         | Key pair     | Higher security ECDH               |
+
+### Key Wrapping
+
+| Algorithm                         | Notes                                |
+| :-------------------------------- | :----------------------------------- |
+| `AES-KW`                          | RFC 3394, purpose-built key wrapping |
+| `AES-GCM`                         | Authenticated wrapping               |
+| `AES-CBC` / `AES-CTR` / `AES-OCB` | Alternative wrapping                 |
+| `ChaCha20-Poly1305`               | Authenticated wrapping               |
+| `RSA-OAEP`                        | Asymmetric wrapping                  |
+
+---
+
+## Real-World Examples
+
+### End-to-End Encryption
+
+Symmetric encryption with a random key.
+
+```ts
+import { subtle } from 'react-native-quick-crypto';
+
+async function secureMessage(msg: string) {
+  // Generate Key
+  const key = await subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, [
+    'encrypt',
+    'decrypt',
+  ]);
+
+  // Encrypt
+  const iv = QuickCrypto.getRandomValues(new Uint8Array(12));
+  const encoded = new TextEncoder().encode(msg);
+
+  const ciphertext = await subtle.encrypt(
+    { name: 'AES-GCM', iv: iv },
+    key,
+    encoded,
+  );
+
+  return { key, iv, ciphertext };
+}
+```
+
+### JWT Verification
+
+Importing a public key from a JWK to verify a token.
+
+```ts
+async function verifyToken(token: string, jwk: any) {
+  const pubKey = await subtle.importKey(
+    'jwk',
+    jwk,
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    false,
+    ['verify'],
+  );
+
+  const [header, payload, sigBase64] = token.split('.');
+  const data = new TextEncoder().encode(`${header}.${payload}`);
+  const signature = Buffer.from(sigBase64, 'base64');
+
+  return await subtle.verify(
+    { name: 'ECDSA', hash: 'SHA-256' },
+    pubKey,
+    signature,
+    data,
+  );
+}
+```
+
+### Password-Based Encryption (PBKDF2 + AES-GCM)
+
+```ts
+import { subtle } from 'react-native-quick-crypto';
+
+async function encryptWithPassword(plaintext: string, password: string) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+
+  const passwordKey = await subtle.importKey(
+    'raw',
+    new TextEncoder().encode(password),
+    'PBKDF2',
+    false,
+    ['deriveKey'],
+  );
+
+  const aesKey = await subtle.deriveKey(
+    { name: 'PBKDF2', salt, iterations: 600000, hash: 'SHA-256' },
+    passwordKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  );
+
+  const ciphertext = await subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    aesKey,
+    new TextEncoder().encode(plaintext),
+  );
+
+  return { ciphertext, salt, iv };
+}
+```

@@ -1,0 +1,29 @@
+name: Local E2E attestation verifier
+
+# The pinned upstream workflow installs the verified release and reads trusted default-branch
+# configuration. Pull request heads are fetched as Git data only; they are never executed.
+on:
+  issue_comment: # zizmor: ignore[dangerous-triggers] default-branch code only; PR code is never executed
+    types: [created, edited, deleted]
+  pull_request_target: # zizmor: ignore[dangerous-triggers] default-branch code only; PR code is never executed
+    branches: [main]
+    types: [opened, synchronize, reopened, edited] # upstream filters edited events to base changes
+  push:
+    branches: [main]
+    paths:
+      - '.github/local-validation/**'
+      - '.github/workflows/local-validation.yml'
+  schedule:
+    - cron: '17 6 * * *'
+
+permissions: {}
+
+jobs:
+  reconcile:
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+    uses: counterbranch/agentscm/.github/workflows/local-validation-reconcile.yml@efcac5a9ddb146bdb360af1cb3c463f001d9982e # v0.1.0-alpha.8
+    with:
+      release-version: 0.1.0-alpha.8

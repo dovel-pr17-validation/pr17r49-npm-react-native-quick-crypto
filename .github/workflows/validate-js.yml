@@ -1,0 +1,141 @@
+name: Validate JS
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/validate-js.yml'
+      - 'bun.lock'
+      - 'packages/react-native-quick-crypto/src/**'
+      - 'packages/react-native-quick-crypto/test/**'
+      - 'packages/react-native-quick-crypto/*.json'
+      - 'packages/react-native-quick-crypto/*.*s'
+      - 'packages/react-native-quick-crypto/bun.lock'
+      - 'example/src/**'
+      - 'example/*.json'
+      - 'example/*.*s'
+      - 'example/*.*sx'
+      - 'example/bun.lock'
+  pull_request:
+    paths:
+      - '.github/workflows/validate-js.yml'
+      - 'bun.lock'
+      - 'packages/react-native-quick-crypto/src/**'
+      - 'packages/react-native-quick-crypto/test/**'
+      - 'packages/react-native-quick-crypto/*.json'
+      - 'packages/react-native-quick-crypto/*.*s'
+      - 'packages/react-native-quick-crypto/bun.lock'
+      - 'example/src/**'
+      - 'example/*.json'
+      - 'example/*.*s'
+      - 'example/*.*sx'
+      - 'example/bun.lock'
+
+env:
+  # Opt actions still on Node 20 (e.g. reviewdog/action-setup) into the runner's Node 24.
+  # Silences deprecation warnings until each action ships a v5.
+  # https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+# Minimum scopes — reviewdog posts tsc errors as review comments on PRs and as
+# check annotations on main, where github-pr-review has no PR to report against.
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  compile_js:
+    name: Compile JS (tsc)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-bun
+
+      - name: Install reviewdog
+        uses: reviewdog/action-setup@v1
+
+      - name: Bootstrap JS
+        run: |
+          bun install
+
+      - name: Run TypeScript # Reviewdog tsc errorformat: %f:%l:%c - error TS%n: %m
+        run: |
+          set -o pipefail
+          bun tsc 2>&1 | sed 's/^[^ ]* typescript: //' | reviewdog -name="tsc" -efm="%f(%l,%c): error TS%n: %m" -reporter="${{ github.event_name == 'pull_request' && 'github-pr-review' || 'github-check' }}" -filter-mode="nofilter" -fail-on-error -tee
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check circular dependencies
+        run: |
+          cd packages/react-native-quick-crypto
+          bun circular
+
+      - name: Run tests
+        run: |
+          cd packages/react-native-quick-crypto
+          bun run test
+
+  audit_runtime_deps:
+    name: Audit runtime deps (bun audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-bun
+
+      # Audits only the 6 runtime `dependencies:` of the published package, not the
+      # workspace's dev/peer tooling. Workspace-level `bun audit` walks through optional
+      # peers (expo, react-native, etc.) which surface ~70 advisories that never reach a
+      # consumer's runtime bundle. Phase 5.1 baseline: zero advisories in the runtime tree.
+      #
+      # `bun audit` resolves peers from the registry regardless of what is installed, so
+      # neither `--omit=peer` nor `[install] peer = false` keeps react-native's own tree
+      # out of the graph — only `--ignore` does. These are metro (react-native's
+      # bundler, dev-time only) reached via the react-native peer of
+      # react-native-quick-base64; they are not in a consumer's runtime bundle. Ignores
+      # are per-advisory, so anything new still fails this job. Drop them once
+      # react-native ships a metro with image-size >= 2.0.3 and a patched braces
+      # (GHSA-vfj7-8cjw-p6xm, via micromatch; no fixed release yet).
+      - name: Audit runtime dependencies
+        run: |
+          mkdir -p /tmp/rnqc-runtime-audit
+          cd /tmp/rnqc-runtime-audit
+          bun -e "const pkg=require('$GITHUB_WORKSPACE/packages/react-native-quick-crypto/package.json'); require('fs').writeFileSync('package.json', JSON.stringify({name:'rnqc-runtime-audit',version:'0.0.0',dependencies:pkg.dependencies},null,2));"
+          cat package.json
+          bun install --no-summary
+          bun audit --audit-level=high \
+            --ignore=GHSA-w3rx-r6r6-pgpr \
+            --ignore=GHSA-5p2g-fcmc-qvqq \
+            --ignore=GHSA-vfj7-8cjw-p6xm
+
+  lint_js:
+    name: JS Lint (eslint, prettier)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Bootstrap JS
+        run: |
+          bun install
+
+      - name: Run ESLint (rnqc)
+        run: |
+          cd packages/react-native-quick-crypto
+          bun lint:fix
+          bun format:fix
+
+      - name: Run ESLint (example)
+        run: |
+          cd example
+          bun lint:fix
+          bun format:fix
+
+      - name: Verify no files have changed after auto-fix
+        run: git diff --exit-code HEAD -- . ':(exclude)bun.lock'
